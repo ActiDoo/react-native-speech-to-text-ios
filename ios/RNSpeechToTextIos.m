@@ -25,23 +25,23 @@
 
 
 
-- (void) setupAndStartRecognizing:(NSString*)localeStr {
+- (void) setupAndStartRecognizing:(NSString*)localeStr widthContextualStrings:(NSArray*)contextualStrings {
     [self teardown];
-    
+
     NSLocale* locale = nil;
     if ([localeStr length] > 0) {
         locale = [NSLocale localeWithLocaleIdentifier:localeStr];
     }
-    
+
     if (locale) {
         self.speechRecognizer = [[SFSpeechRecognizer alloc] initWithLocale:locale];
     } else {
         self.speechRecognizer = [[SFSpeechRecognizer alloc] init];
     }
-    
+
     self.speechRecognizer.delegate = self;
-    
-    
+
+
     NSError* audioSessionError = nil;
     self.audioSession = [AVAudioSession sharedInstance];
     [self.audioSession setCategory:AVAudioSessionCategoryRecord error:&audioSessionError];
@@ -59,64 +59,65 @@
         [self sendResult:RCTMakeError([audioSessionError localizedDescription], nil, nil) :nil :nil :nil];
         return;
     }
-    
-    
+
+
     self.recognitionRequest = [[SFSpeechAudioBufferRecognitionRequest alloc] init];
-    
+
     if (self.recognitionRequest == nil){
         [self sendResult:RCTMakeError(@"Unable to created a SFSpeechAudioBufferRecognitionRequest object", nil, nil) :nil :nil :nil];
         return;
     }
-    
+
     if (self.audioEngine == nil) {
         self.audioEngine = [[AVAudioEngine alloc] init];
     }
-    
+
     AVAudioInputNode* inputNode = self.audioEngine.inputNode;
     if (inputNode == nil) {
         [self sendResult:RCTMakeError(@"Audio engine has no input node", nil, nil) :nil :nil :nil];
         return;
     }
-    
+
     // Configure request so that results are returned before audio recording is finished
     self.recognitionRequest.shouldReportPartialResults = YES;
+    self.recognitionRequest.contextualStrings = contextualStrings;
 
     // A recognition task represents a speech recognition session.
     // We keep a reference to the task so that it can be cancelled.
     self.recognitionTask = [self.speechRecognizer recognitionTaskWithRequest:self.recognitionRequest resultHandler:^(SFSpeechRecognitionResult * _Nullable result, NSError * _Nullable error) {
-        
+
         if (error != nil) {
             [self sendResult:RCTMakeError([error localizedDescription], nil, nil) :nil :nil :nil];
             [self teardown];
             return;
         }
-        
+
         BOOL isFinal = result.isFinal;
         if (result != nil) {
             NSMutableArray* transcriptionDics = [NSMutableArray new];
             for (SFTranscription* transcription in result.transcriptions) {
                 [transcriptionDics addObject:[self dicFromTranscription:transcription]];
             }
-            
+
             [self sendResult:[NSNull null] :[self dicFromTranscription:result.bestTranscription] :transcriptionDics :@(isFinal)];
         }
-        
+
         if (isFinal == YES) {
             [self teardown];
         }
-        
+
         NSLog(@"CALLBACK : Final: %i, status:%i", isFinal, self.recognitionTask.state);
-        
+
     }];
-    
+
     AVAudioFormat* recordingFormat = [inputNode outputFormatForBus:0];
-    
+
     [inputNode installTapOnBus:0 bufferSize:1024 format:recordingFormat block:^(AVAudioPCMBuffer * _Nonnull buffer, AVAudioTime * _Nonnull when) {
         if (self.recognitionRequest != nil) {
             [self.recognitionRequest appendAudioPCMBuffer:buffer];
         }
     }];
-    
+
     [self.audioEngine prepare];
     [self.audioEngine startAndReturnError:&audioSessionError];
     if (audioSessionError != nil) {
@@ -140,7 +141,7 @@
     if (isFinal != nil) {
         result[@"isFinal"] = isFinal;
     }
-    
+
     [self.bridge.eventDispatcher sendAppEventWithName:@"SpeechToText"
                                                  body:result];
 }
@@ -150,13 +151,13 @@
     self.recognitionTask = nil;
     [self.audioSession setCategory:AVAudioSessionCategoryAmbient error:nil];
     self.audioSession = nil;
-    
+
     if (self.audioEngine.isRunning) {
         [self.audioEngine stop];
         [self.recognitionRequest endAudio];
         [self.audioEngine.inputNode removeTapOnBus:0];
     }
-    
+
     self.recognitionRequest = nil;
 }
 
@@ -174,7 +175,7 @@
                    };
         [secgmentsDics addObject:dic];
     }
-    
+
     return @{@"formattedString":transcription.formattedString,
              @"segments":secgmentsDics};
 }
@@ -199,14 +200,14 @@ RCT_EXPORT_METHOD(stopRecognition)
     [self teardown];
 }
 
-RCT_EXPORT_METHOD(startRecognition:(NSString*)localeStr)
+RCT_EXPORT_METHOD(startRecognition:(NSString*)localeStr widthContextualStrings:(NSArray*)contextualStrings)
 {
     if (self.recognitionTask != nil) {
         [self sendResult:RCTMakeError(@"Speech recognition already started!", nil, nil) :nil :nil :nil];
         return;
     }
-    
-    
+
+
     [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
         switch (status) {
             case SFSpeechRecognizerAuthorizationStatusNotDetermined:
@@ -219,11 +220,11 @@ RCT_EXPORT_METHOD(startRecognition:(NSString*)localeStr)
                 [self sendResult:RCTMakeError(@"Speech recognition restricted on this device", nil, nil) :nil :nil :nil];
                 break;
             case SFSpeechRecognizerAuthorizationStatusAuthorized:
-                [self setupAndStartRecognizing:localeStr];
+                [self setupAndStartRecognizing:localeStr widthContextualStrings:contextualStrings];
                 break;
         }
     }];
-    
+
 }
 
 
@@ -241,4 +242,3 @@ RCT_EXPORT_MODULE()
 
 
 @end
-  
